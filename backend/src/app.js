@@ -30,6 +30,18 @@ app.get("/", (req, res) => {
 });
 
 /* ==========================
+   HEALTH CHECK (Para la app móvil)
+========================== */
+app.get("/api/health", (req, res) => {
+    res.status(200).json({
+        status: "OK",
+        timestamp: new Date().toISOString(),
+        message: "Backend funcionando correctamente",
+        uptime: process.uptime()
+    });
+});
+
+/* ==========================
    DOCUMENTACIÓN SWAGGER
 ========================== */
 app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
