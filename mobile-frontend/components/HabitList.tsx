@@ -1,0 +1,91 @@
+import React from 'react';
+import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
+import { HabitCard } from './HabitCard';
+import { useTheme } from '../hooks/useTheme';
+
+interface Habit {
+  id: number;
+  nombre: string;
+  descripcion?: string;
+  objetivo_diario: number;
+  completado: boolean;
+}
+
+interface HabitListProps {
+  habits: Habit[];
+  loading: boolean;
+  error?: string;
+  onHabitPress: (habit: Habit) => void;
+  onToggleComplete: (habit: Habit) => void;
+  onRetry?: () => void;
+}
+
+export const HabitList: React.FC<HabitListProps> = ({
+  habits,
+  loading,
+  error,
+  onHabitPress,
+  onToggleComplete,
+  onRetry,
+}) => {
+  const theme = useTheme();
+
+  if (loading) {
+    return (
+      <View style={styles.center}>
+        <ActivityIndicator size="large" color={theme.colors.semantic.primary.main} />
+        <Text style={[styles.message, { color: theme.colors.semantic.text.secondary }]}>Cargando tus hábitos...</Text>
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View style={styles.center}>
+        <Text style={[styles.errorText, { color: theme.colors.semantic.error }]}>⚠️ {error}</Text>
+        {onRetry && (
+          <Text style={[styles.retry, { color: theme.colors.semantic.primary.main }]} onPress={onRetry}>
+            Intentar de nuevo
+          </Text>
+        )}
+      </View>
+    );
+  }
+
+  if (habits.length === 0) {
+    return (
+      <View style={styles.center}>
+        <Text style={[styles.emptyIcon, { color: theme.colors.semantic.text.hint }]}>📋</Text>
+        <Text style={[styles.emptyTitle, { color: theme.colors.semantic.text.primary }]}>No tienes hábitos</Text>
+        <Text style={[styles.emptyDescription, { color: theme.colors.semantic.text.secondary }]}>
+          Crea tu primer hábito para empezar a mejorar tu bienestar.
+        </Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.list}>
+      {habits.map((habit) => (
+        <HabitCard
+          key={habit.id}
+          habit={habit}
+          onPress={() => onHabitPress(habit)}
+          onToggleComplete={() => onToggleComplete(habit)}
+          showProgress={true}
+        />
+      ))}
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 40 },
+  list: { flex: 1 },
+  message: { marginTop: 16, fontSize: 16 },
+  errorText: { fontSize: 16, textAlign: 'center', marginBottom: 12 },
+  retry: { fontSize: 14, fontWeight: '600', textDecorationLine: 'underline' },
+  emptyIcon: { fontSize: 48, marginBottom: 16 },
+  emptyTitle: { fontSize: 20, fontWeight: '600', marginBottom: 8 },
+  emptyDescription: { fontSize: 16, textAlign: 'center', opacity: 0.7 },
+});
