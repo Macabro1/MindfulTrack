@@ -1,67 +1,148 @@
-import { useEffect, useState } from 'react';
-import { StyleSheet } from 'react-native';
-import { Text, View } from '@/components/Themed';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet } from 'react-native';
+import { ScreenContainer } from '../../components/ScreenContainer';
+import { HabitList } from '../../components/HabitList';
+import { Button } from '../../components/Button';
+import { useTheme } from '../../hooks/useTheme';
 
+// ============================================
+// CONFIGURACIÓN
+// ============================================
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
 
-export default function TabOneScreen() {
-  const [status, setStatus] = useState('🔄 Conectando al backend...');
+// ============================================
+// TIPOS
+// ============================================
+interface Habit {
+  id: number;
+  nombre: string;
+  descripcion?: string;
+  objetivo_diario: number;
+  completado: boolean;
+}
 
-  useEffect(() => {
-    // Intentar conectar con el backend
-    fetch(`${API_URL}/api/health`)
-      .then(res => {
-        if (!res.ok) {
-          throw new Error(`HTTP error! status: ${res.status}`);
-        }
-        return res.json();
-      })
-      .then(data => {
-        console.log('✅ Respuesta del backend:', data);
-        setStatus('✅ Conectado al backend');
-      })
-      .catch(err => {
-        console.error('❌ Error de conexión:', err);
-        setStatus('❌ No se pudo conectar al backend');
+// ============================================
+// COMPONENTE PRINCIPAL
+// ============================================
+export default function DashboardScreen() {
+  const theme = useTheme();
+  const [habits, setHabits] = useState<Habit[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | undefined>();
+
+  // ==========================================
+  // 1. CARGAR HÁBITOS
+  // ==========================================
+  const fetchHabits = async () => {
+    setLoading(true);
+    setError(undefined);
+
+    try {
+      const response = await fetch(`${API_URL}/api/habits`, {
+        headers: {
+          'Content-Type': 'application/json',
+        },
       });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+
+      if (data.success) {
+        // ✅ CAMBIA ESTA LÍNEA PARA PROBAR ESTADOS:
+        // - Estado normal:    setHabits(data.data || []);
+        // - Estado vacío:     setHabits([]);
+        // - Estado error:     setError('Error de prueba');
+        setHabits(data.data || []);
+      } else {
+        setError(data.message || 'Error al cargar hábitos');
+        setHabits([]);
+      }
+    } catch (err) {
+      console.error('❌ Error al cargar hábitos:', err);
+      setError('No se pudieron cargar los hábitos');
+      setHabits([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ==========================================
+  // 2. EFECTO INICIAL
+  // ==========================================
+  useEffect(() => {
+    fetchHabits();
   }, []);
 
+  // ==========================================
+  // 3. FUNCIONES DE INTERACCIÓN
+  // ==========================================
+  const handleHabitPress = (habit: Habit) => {
+    console.log('📱 Hábito presionado:', habit.nombre);
+  };
+
+  const handleToggleComplete = (habit: Habit) => {
+    const updated = { ...habit, completado: !habit.completado };
+    setHabits(habits.map(h => h.id === habit.id ? updated : h));
+  };
+
+  const handleRetry = () => {
+    fetchHabits();
+  };
+
+  const handleAddHabit = () => {
+    console.log('➕ Crear nuevo hábito');
+  };
+
+  // ==========================================
+  // 4. RENDER
+  // ==========================================
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>🧘 MindfulTrack</Text>
-      <View style={styles.separator} lightColor="#eee" darkColor="rgba(255,255,255,0.1)" />
-      <Text style={styles.status}>{status}</Text>
-      <Text style={styles.hint}>IP: {API_URL}</Text>
-    </View>
+    <ScreenContainer scrollable={false}>
+      <View style={styles.header}>
+        <Text style={[styles.title, { color: theme.colors.semantic.text.primary }]}>
+          🧘 MindfulTrack
+        </Text>
+        <Text style={[styles.subtitle, { color: theme.colors.semantic.text.secondary }]}>
+          Tus hábitos diarios
+        </Text>
+      </View>
+
+      <HabitList
+        habits={habits}
+        loading={loading}
+        error={error}
+        onHabitPress={handleHabitPress}
+        onToggleComplete={handleToggleComplete}
+        onRetry={handleRetry}
+      />
+
+      <Button
+        variant="primary"
+        fullWidth
+        onPress={handleAddHabit}
+      >
+        + Nuevo Hábito
+      </Button>
+    </ScreenContainer>
   );
 }
 
+// ============================================
+// ESTILOS
+// ============================================
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 20,
+  header: {
+    marginBottom: 20,
   },
   title: {
     fontSize: 28,
-    fontWeight: 'bold',
-    marginBottom: 10,
+    fontWeight: '700',
   },
-  separator: {
-    marginVertical: 30,
-    height: 1,
-    width: '80%',
-  },
-  status: {
-    fontSize: 18,
-    marginVertical: 10,
-    textAlign: 'center',
-  },
-  hint: {
-    fontSize: 12,
-    color: '#999',
-    marginTop: 20,
-    textAlign: 'center',
+  subtitle: {
+    fontSize: 16,
+    marginTop: 4,
   },
 });
