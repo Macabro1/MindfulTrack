@@ -38,48 +38,44 @@ const findByNameAndUser = async (usuario_id, nombre) => {
 };
 
 // ============================================
-// ✅ OPTIMIZADO: OBTENER TODOS LOS HÁBITOS CON EAGER LOADING
-//    Corrige el problema N+1 usando JOIN + JSON_ARRAYAGG
-//    Una sola consulta SQL
+// ✅ OBTENER TODOS LOS HÁBITOS (VERSIÓN SIMPLIFICADA)
+//    Elimina JSON_ARRAYAGG para evitar errores
 // ============================================
 const findAllByUser = async (usuario_id) => {
-    const [rows] = await pool.query(
-        `SELECT
-            h.id,
-            h.usuario_id,
-            h.nombre,
-            h.descripcion,
-            h.objetivo_diario,
-            h.activo,
-            h.completado,
-            h.fecha_creacion,
-            JSON_ARRAYAGG(
-                JSON_OBJECT(
-                    'id', hl.id,
-                    'fecha', hl.fecha,
-                    'progreso', hl.progreso,
-                    'completado', hl.completado
-                )
-            ) AS logs
-         FROM habits h
-         LEFT JOIN habit_logs hl ON h.id = hl.habit_id
-         WHERE h.usuario_id = ?
-           AND h.activo = 1
-         GROUP BY h.id
-         ORDER BY h.id DESC`,
-        [usuario_id]
-    );
-
-    // Parsear los logs (MySQL devuelve string)
-    return rows.map(row => ({
-        ...row,
-        logs: row.logs ? JSON.parse(row.logs) : []
-    }));
+    try {
+        console.log('🔍 Buscando hábitos para usuario:', usuario_id);
+        
+        const [rows] = await pool.query(
+            `SELECT
+                h.id,
+                h.usuario_id,
+                h.nombre,
+                h.descripcion,
+                h.objetivo_diario,
+                h.activo,
+                h.completado,
+                h.fecha_creacion AS created_at,
+                h.frecuencia,
+                h.color,
+                h.icono,
+                h.updated_at
+             FROM habits h
+             WHERE h.usuario_id = ?
+               AND h.activo = 1
+             ORDER BY h.id DESC`,
+            [usuario_id]
+        );
+        
+        console.log('✅ Hábitos encontrados:', rows.length);
+        return rows;
+    } catch (error) {
+        console.error('❌ Error en findAllByUser:', error);
+        throw error;
+    }
 };
 
 // ============================================
-// ✅ NUEVO: OBTENER HÁBITOS CON PAGINACIÓN
-//    Para optimizar la transferencia de datos
+// ✅ OBTENER HÁBITOS CON PAGINACIÓN
 // ============================================
 const findAllByUserPaginated = async (usuario_id, options = {}) => {
     const { 
@@ -100,43 +96,32 @@ const findAllByUserPaginated = async (usuario_id, options = {}) => {
             h.objetivo_diario,
             h.activo,
             h.completado,
-            h.fecha_creacion,
-            JSON_ARRAYAGG(
-                JSON_OBJECT(
-                    'id', hl.id,
-                    'fecha', hl.fecha,
-                    'progreso', hl.progreso,
-                    'completado', hl.completado
-                )
-            ) AS logs
+            h.fecha_creacion AS created_at,
+            h.frecuencia,
+            h.color,
+            h.icono,
+            h.updated_at
         FROM habits h
-        LEFT JOIN habit_logs hl ON h.id = hl.habit_id
         WHERE h.usuario_id = ?
           AND h.activo = 1
     `;
     
     const params = [usuario_id];
     
-    // Búsqueda por nombre
     if (search) {
         query += ` AND h.nombre LIKE ?`;
         params.push(`%${search}%`);
     }
     
-    query += ` GROUP BY h.id ORDER BY ${sort} LIMIT ? OFFSET ?`;
+    query += ` ORDER BY ${sort} LIMIT ? OFFSET ?`;
     params.push(parseInt(limit), parseInt(offset));
     
     const [rows] = await pool.query(query, params);
-    
-    return rows.map(row => ({
-        ...row,
-        logs: row.logs ? JSON.parse(row.logs) : []
-    }));
+    return rows;
 };
 
 // ============================================
-// ✅ NUEVO: CONTAR HÁBITOS DEL USUARIO
-//    Para la paginación
+// CONTAR HÁBITOS DEL USUARIO
 // ============================================
 const countByUser = async (usuario_id, search = '') => {
     let query = `SELECT COUNT(*) AS total FROM habits WHERE usuario_id = ? AND activo = 1`;
@@ -164,7 +149,11 @@ const findByIdAndUser = async (id, usuario_id) => {
             objetivo_diario,
             activo,
             completado,
-            fecha_creacion
+            fecha_creacion AS created_at,
+            frecuencia,
+            color,
+            icono,
+            updated_at
          FROM habits
          WHERE id = ?
            AND usuario_id = ?
@@ -176,8 +165,7 @@ const findByIdAndUser = async (id, usuario_id) => {
 };
 
 // ============================================
-// ✅ NUEVO: OBTENER HÁBITO CON ESTADO DE COMPLETADO
-//    Para validaciones
+// OBTENER HÁBITO CON ESTADO DE COMPLETADO
 // ============================================
 const findByIdWithStatus = async (id, usuario_id) => {
     const [rows] = await pool.query(
@@ -189,7 +177,7 @@ const findByIdWithStatus = async (id, usuario_id) => {
             objetivo_diario,
             activo,
             completado,
-            fecha_creacion
+            fecha_creacion AS created_at
          FROM habits
          WHERE id = ? AND usuario_id = ?`,
         [id, usuario_id]
@@ -199,8 +187,7 @@ const findByIdWithStatus = async (id, usuario_id) => {
 };
 
 // ============================================
-// ✅ ACTUALIZADO: ACTUALIZAR HÁBITO
-//    Soporta campos dinámicos (incluye completado)
+// ACTUALIZAR HÁBITO
 // ============================================
 const update = async (id, usuario_id, habit) => {
     const {
@@ -210,7 +197,6 @@ const update = async (id, usuario_id, habit) => {
         completado
     } = habit;
 
-    // Construir SET dinámicamente
     let setClauses = [];
     let params = [];
     
@@ -231,14 +217,13 @@ const update = async (id, usuario_id, habit) => {
         params.push(completado);
     }
     
-    // Si no hay campos para actualizar
     if (setClauses.length === 0) {
         return false;
     }
     
     const [result] = await pool.query(
         `UPDATE habits
-         SET ${setClauses.join(', ')}
+         SET ${setClauses.join(', ')}, updated_at = NOW()
          WHERE id = ? AND usuario_id = ?`,
         [...params, id, usuario_id]
     );
@@ -252,7 +237,7 @@ const update = async (id, usuario_id, habit) => {
 const remove = async (id, usuario_id) => {
     const [result] = await pool.query(
         `UPDATE habits
-         SET activo = 0
+         SET activo = 0, updated_at = NOW()
          WHERE id = ? AND usuario_id = ?`,
         [id, usuario_id]
     );
