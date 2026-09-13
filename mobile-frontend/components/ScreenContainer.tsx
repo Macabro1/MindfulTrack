@@ -1,5 +1,6 @@
 import React from 'react';
-import { View, ScrollView, StyleSheet, SafeAreaView } from 'react-native';
+import { View, ScrollView, StyleSheet } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../hooks/useTheme';
 
 interface ScreenContainerProps {
@@ -14,16 +15,37 @@ export const ScreenContainer: React.FC<ScreenContainerProps> = ({
   children,
 }) => {
   const theme = useTheme();
-  const Container = scrollable ? ScrollView : View;
+
+  if (scrollable) {
+    return (
+      <SafeAreaView
+        style={[styles.safeArea, { backgroundColor: theme.colors.semantic.background.secondary }]}
+        edges={['top', 'left', 'right']}
+      >
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={[styles.scrollContent, { padding }]}
+          showsVerticalScrollIndicator={false}
+        >
+          {children}
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
 
   return (
-    <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.colors.semantic.background.secondary }]}>
-      <Container
-        style={[styles.container, { padding, backgroundColor: theme.colors.semantic.background.secondary }]}
-        showsVerticalScrollIndicator={false}
+    <SafeAreaView
+      style={[styles.safeArea, { backgroundColor: theme.colors.semantic.background.secondary }]}
+      edges={['top', 'left', 'right']}
+    >
+      <View
+        style={[
+          styles.container,
+          { padding, backgroundColor: theme.colors.semantic.background.secondary },
+        ]}
       >
         {children}
-      </Container>
+      </View>
     </SafeAreaView>
   );
 };
@@ -31,4 +53,6 @@ export const ScreenContainer: React.FC<ScreenContainerProps> = ({
 const styles = StyleSheet.create({
   safeArea: { flex: 1 },
   container: { flex: 1 },
+  scrollView: { flex: 1 },
+  scrollContent: { flexGrow: 1, paddingBottom: 40 },
 });
