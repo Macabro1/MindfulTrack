@@ -146,6 +146,45 @@ class DatabaseService {
     );
   }
 
+  // ============================================
+  // NUEVO: RESETEAR ITEMS FALLIDOS A PENDING
+  // ============================================
+  async resetFailedItems(): Promise<number> {
+    try {
+      const result = await this.db.runAsync(
+        `UPDATE sync_queue 
+         SET status = 'pending', attempts = 0, next_retry_at = NULL 
+         WHERE status = 'failed'`
+      );
+      console.log(`🔄 Items fallidos reseteados a pending`);
+      return result.changes || 0;
+    } catch (error) {
+      console.error('❌ Error al resetear items fallidos:', error);
+      return 0;
+    }
+  }
+
+  // ============================================
+  // NUEVO: CONTAR ITEMS POR ESTADO
+  // ============================================
+  async getQueueStats(): Promise<{ pending: number; failed: number; completed: number }> {
+    const pending = await this.db.getFirstAsync(
+      `SELECT COUNT(*) as count FROM sync_queue WHERE status = 'pending'`
+    );
+    const failed = await this.db.getFirstAsync(
+      `SELECT COUNT(*) as count FROM sync_queue WHERE status = 'failed'`
+    );
+    const completed = await this.db.getFirstAsync(
+      `SELECT COUNT(*) as count FROM sync_queue WHERE status = 'completed'`
+    );
+
+    return {
+      pending: pending?.count || 0,
+      failed: failed?.count || 0,
+      completed: completed?.count || 0,
+    };
+  }
+
   async clearAllData(): Promise<void> {
     await this.db.execAsync(`
       DELETE FROM habits;
@@ -157,14 +196,20 @@ class DatabaseService {
   }
 
   async getStats(): Promise<any> {
-    const habitsCount = await this.db.getFirstAsync('SELECT COUNT(*) as count FROM habits WHERE is_deleted = 0');
-    const logsCount = await this.db.getFirstAsync('SELECT COUNT(*) as count FROM habit_logs');
-    const queueCount = await this.db.getFirstAsync('SELECT COUNT(*) as count FROM sync_queue WHERE status = "pending"');
-    
+    const habitsCount = await this.db.getFirstAsync(
+      'SELECT COUNT(*) as count FROM habits WHERE is_deleted = 0'
+    );
+    const logsCount = await this.db.getFirstAsync(
+      'SELECT COUNT(*) as count FROM habit_logs'
+    );
+    const queueCount = await this.db.getFirstAsync(
+      `SELECT COUNT(*) as count FROM sync_queue WHERE status = 'pending'`
+    );
+
     return {
       habits: habitsCount?.count || 0,
       logs: logsCount?.count || 0,
-      pendingSync: queueCount?.count || 0
+      pendingSync: queueCount?.count || 0,
     };
   }
 }

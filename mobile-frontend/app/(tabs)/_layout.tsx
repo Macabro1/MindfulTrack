@@ -1,6 +1,5 @@
 import { SymbolView } from 'expo-symbols';
 import { Tabs } from 'expo-router';
-
 import Colors from '@/constants/Colors';
 import { useColorScheme } from '@/components/useColorScheme';
 import { useClientOnlyValue } from '@/components/useClientOnlyValue';
@@ -21,11 +20,7 @@ export default function TabLayout() {
           title: 'Hábitos',
           tabBarIcon: ({ color }) => (
             <SymbolView
-              name={{
-                ios: 'list.bullet',
-                android: 'list',
-                web: 'list',
-              }}
+              name={{ ios: 'list.bullet', android: 'list', web: 'list' }}
               tintColor={color}
               size={28}
             />
@@ -35,14 +30,10 @@ export default function TabLayout() {
       <Tabs.Screen
         name="create"
         options={{
-          title: 'Nuevo Hábito',
+          title: 'Nuevo',
           tabBarIcon: ({ color }) => (
             <SymbolView
-              name={{
-                ios: 'plus.circle',
-                android: 'add_circle',
-                web: 'add_circle',
-              }}
+              name={{ ios: 'plus.circle', android: 'add_circle', web: 'add_circle' }}
               tintColor={color}
               size={28}
             />
@@ -50,16 +41,12 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="two"
+        name="more"
         options={{
           title: 'Más',
           tabBarIcon: ({ color }) => (
             <SymbolView
-              name={{
-                ios: 'ellipsis.circle',
-                android: 'more_horiz',
-                web: 'more_horiz',
-              }}
+              name={{ ios: 'ellipsis.circle', android: 'more_horiz', web: 'more_horiz' }}
               tintColor={color}
               size={28}
             />

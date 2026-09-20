@@ -13,6 +13,7 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '../../hooks/useTheme';
 import ImageService from '../../services/imageService';
 import NotificationService from '../../services/notificationService';
+import DatabaseService from '../../services/database';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
 
@@ -29,9 +30,7 @@ export default function CreateHabitScreen() {
 
   const handleSelectImage = async () => {
     const uri = await ImageService.showImagePickerOptions();
-    if (uri) {
-      setImagen(uri);
-    }
+    if (uri) setImagen(uri);
   };
 
   const handleCreate = async () => {
@@ -50,44 +49,99 @@ export default function CreateHabitScreen() {
     setLoading(true);
     setErrors({});
 
+    const habitId = `habit_${Date.now()}`;
+    const localHabit = {
+      id: habitId,
+      name: nombre.trim(),
+      description: descripcion.trim(),
+      frequency: 'daily',
+      objetivo_diario: Number(objetivoDiario),
+      created_at: Date.now(),
+      updated_at: Date.now(),
+      sync_status: 'pending',
+    };
+
     try {
-      const response = await fetch(`${API_URL}/api/habits`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      // ============================================
+      // 1. GUARDAR LOCALMENTE EN SQLITE
+      // ============================================
+      await DatabaseService.saveHabit(localHabit);
+      console.log('✅ Hábito guardado localmente:', habitId);
+
+      // ============================================
+      // 2. AGREGAR A LA COLA DE SINCRONIZACIÓN
+      // ============================================
+      await DatabaseService.addToQueue(
+        'create_habit',
+        'habit',
+        habitId,
+        {
           nombre: nombre.trim(),
           descripcion: descripcion.trim(),
           objetivo_diario: Number(objetivoDiario),
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        if (response.status === 422 && data.errors) {
-          setErrors(data.errors);
-          Alert.alert('Errores de validación', 'Revisa los campos marcados');
-          return;
         }
-        throw new Error(data.message || `Error HTTP ${response.status}`);
+      );
+      console.log('✅ Hábito agregado a la cola');
+
+      // ============================================
+      // 3. INTENTAR ENVIAR AL BACKEND
+      // ============================================
+      let backendSuccess = false;
+
+      try {
+        const response = await fetch(`${API_URL}/api/habits`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            nombre: nombre.trim(),
+            descripcion: descripcion.trim(),
+            objetivo_diario: Number(objetivoDiario),
+          }),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          if (data.data?.id) {
+            await DatabaseService.saveHabit({
+              ...localHabit,
+              id: data.data.id.toString(),
+              sync_status: 'synced',
+            });
+
+            if (recordatorioActivo) {
+              try {
+                await NotificationService.scheduleHabitReminder(
+                  data.data.id,
+                  nombre.trim(),
+                  9,
+                  0
+                );
+              } catch (notifError) {
+                console.log('No se pudo programar notificación:', notifError);
+              }
+            }
+
+            backendSuccess = true;
+          }
+        }
+      } catch (backendError) {
+        console.log('📴 Sin conexión, se sincronizará después');
       }
 
-      if (recordatorioActivo && data.data?.id) {
-        try {
-          await NotificationService.scheduleHabitReminder(
-            data.data.id,
-            nombre.trim(),
-            9,
-            0
-          );
-        } catch (notifError) {
-          console.log('No se pudo programar notificación:', notifError);
-        }
+      // ============================================
+      // 4. MOSTRAR MENSAJE AL USUARIO
+      // ============================================
+      if (backendSuccess) {
+        Alert.alert('✅ Éxito', 'Hábito creado correctamente', [
+          { text: 'OK', onPress: () => router.back() },
+        ]);
+      } else {
+        Alert.alert(
+          '✅ Guardado localmente',
+          'El hábito se creó sin conexión. Se sincronizará automáticamente cuando recuperes la conexión.',
+          [{ text: 'OK', onPress: () => router.back() }]
+        );
       }
-
-      Alert.alert('Éxito', 'Hábito creado correctamente', [
-        { text: 'OK', onPress: () => router.back() },
-      ]);
     } catch (error: any) {
       console.error('❌ Error al crear hábito:', error);
       Alert.alert('Error', error.message || 'No se pudo crear el hábito');
@@ -108,7 +162,7 @@ export default function CreateHabitScreen() {
           </Text>
         </View>
 
-        {/* SELECTOR DE IMAGEN - FUNCIONALIDAD NATIVA */}
+        {/* SELECTOR DE IMAGEN */}
         <View style={styles.imageSection}>
           <TouchableOpacity style={styles.imageButton} onPress={handleSelectImage}>
             {imagen ? (
@@ -168,7 +222,6 @@ export default function CreateHabitScreen() {
             <Text style={styles.errorText}>{errors.objetivoDiario}</Text>
           )}
 
-          {/* RECORDATORIO - FUNCIONALIDAD NATIVA */}
           <TouchableOpacity
             style={styles.reminderRow}
             onPress={() => setRecordatorioActivo(!recordatorioActivo)}
@@ -176,12 +229,7 @@ export default function CreateHabitScreen() {
             <Text style={styles.reminderLabel}>
               🔔 Activar recordatorio diario (9:00 AM)
             </Text>
-            <View
-              style={[
-                styles.checkbox,
-                recordatorioActivo && styles.checkboxActive,
-              ]}
-            >
+            <View style={[styles.checkbox, recordatorioActivo && styles.checkboxActive]}>
               {recordatorioActivo && <Text style={styles.checkmark}>✓</Text>}
             </View>
           </TouchableOpacity>
@@ -215,16 +263,9 @@ const styles = StyleSheet.create({
   subtitle: { fontSize: 16, marginTop: 4, color: '#666' },
   imageSection: { alignItems: 'center', marginBottom: 20 },
   imageButton: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    overflow: 'hidden',
-    backgroundColor: '#EEE',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#DDD',
-    borderStyle: 'dashed',
+    width: 120, height: 120, borderRadius: 60, overflow: 'hidden',
+    backgroundColor: '#EEE', justifyContent: 'center', alignItems: 'center',
+    borderWidth: 2, borderColor: '#DDD', borderStyle: 'dashed',
   },
   imagePreview: { width: 120, height: 120, borderRadius: 60 },
   imagePlaceholder: { alignItems: 'center' },
@@ -234,47 +275,28 @@ const styles = StyleSheet.create({
   form: { marginBottom: 20 },
   label: { fontSize: 14, fontWeight: '600', marginBottom: 6, marginTop: 12, color: '#333' },
   input: {
-    borderWidth: 1,
-    borderColor: '#DDD',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    fontSize: 16,
-    backgroundColor: '#FFF',
-    color: '#333',
+    borderWidth: 1, borderColor: '#DDD', borderRadius: 8,
+    paddingHorizontal: 12, paddingVertical: 12, fontSize: 16,
+    backgroundColor: '#FFF', color: '#333',
   },
   inputError: { borderColor: '#F44336', backgroundColor: '#FFEBEE' },
   textArea: { minHeight: 80, textAlignVertical: 'top' },
   errorText: { color: '#F44336', fontSize: 12, marginTop: 4 },
   reminderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 20,
-    padding: 12,
-    backgroundColor: '#FFF',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#DDD',
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    marginTop: 20, padding: 12, backgroundColor: '#FFF',
+    borderRadius: 8, borderWidth: 1, borderColor: '#DDD',
   },
   reminderLabel: { fontSize: 14, color: '#333', flex: 1 },
   checkbox: {
-    width: 24,
-    height: 24,
-    borderRadius: 4,
-    borderWidth: 2,
-    borderColor: '#999',
-    justifyContent: 'center',
-    alignItems: 'center',
+    width: 24, height: 24, borderRadius: 4, borderWidth: 2,
+    borderColor: '#999', justifyContent: 'center', alignItems: 'center',
   },
   checkboxActive: { backgroundColor: '#4CAF50', borderColor: '#4CAF50' },
   checkmark: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
   button: {
-    backgroundColor: '#2196F3',
-    paddingVertical: 14,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginTop: 12,
+    backgroundColor: '#2196F3', paddingVertical: 14, borderRadius: 8,
+    alignItems: 'center', marginTop: 12,
   },
   buttonDisabled: { backgroundColor: '#90CAF9' },
   buttonText: { color: '#FFF', fontSize: 16, fontWeight: '700' },

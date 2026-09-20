@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'expo-router';
 import { View, Text, StyleSheet } from 'react-native';
+import * as Network from 'expo-network';
 import { ScreenContainer } from '../../components/ScreenContainer';
 import { HabitList } from '../../components/HabitList';
 import { Button } from '../../components/Button';
 import { useTheme } from '../../hooks/useTheme';
+import DatabaseService from '../../services/database';
+import SyncService from '../../services/syncService';
 
 // ============================================
 // CONFIGURACIÓN
@@ -43,11 +46,11 @@ export default function DashboardScreen() {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
-      
+
       const response = await fetch(`${API_URL}/api/health`, {
         signal: controller.signal,
       });
-      
+
       clearTimeout(timeoutId);
       const connected = response.ok;
       setIsConnected(connected);
@@ -59,7 +62,54 @@ export default function DashboardScreen() {
   };
 
   // ==========================================
-  // 2. CARGAR HÁBITOS
+  // 2. CARGAR HÁBITOS LOCALES (SQLite)
+  // ==========================================
+  const loadLocalHabits = async () => {
+    try {
+      const localHabits = await DatabaseService.getHabits();
+      console.log('📱 Hábitos locales:', localHabits.length);
+
+      const mappedHabits: Habit[] = localHabits.map((h: any) => ({
+        id: h.id,
+        nombre: h.name,
+        descripcion: h.description || '',
+        objetivo_diario: h.objetivo_diario || 1,
+        completado: false,
+        sync_status: h.sync_status || 'synced',
+      }));
+
+      setHabits(mappedHabits);
+
+      const pending = mappedHabits.filter(
+        (h) => h.sync_status === 'pending'
+      ).length;
+      setPendingCount(pending);
+
+      return mappedHabits;
+    } catch (dbError) {
+      console.error('❌ Error al cargar hábitos locales:', dbError);
+      return [];
+    }
+  };
+
+  // ==========================================
+  // 3. PROCESAR COLA DE SINCRONIZACIÓN
+  // ==========================================
+  const processQueue = async () => {
+    try {
+      console.log('🔄 Procesando cola de sincronización...');
+      await SyncService.syncPendingQueue();
+      console.log('✅ Cola procesada');
+
+      const pending = await DatabaseService.getPendingQueue();
+      setPendingCount(pending.length);
+    } catch (syncError) {
+      console.error('❌ Error al procesar cola:', syncError);
+    }
+  };
+
+  // ==========================================
+  // 4. CARGAR HÁBITOS (remoto + local)
   // ==========================================
   const fetchHabits = async () => {
     setLoading(true);
@@ -69,15 +119,18 @@ export default function DashboardScreen() {
       const connected = await checkConnection();
 
       if (!connected) {
+        console.log('📴 Sin conexión, cargando hábitos locales...');
         setError('Sin conexión. Mostrando datos locales.');
+        await loadLocalHabits();
         setLoading(false);
         return;
       }
 
+      // Procesar cola antes de cargar
+      await processQueue();
+
       const response = await fetch(`${API_URL}/api/habits`, {
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
       });
 
       if (!response.ok) {
@@ -87,22 +140,40 @@ export default function DashboardScreen() {
       const data = await response.json();
 
       if (data.success) {
-        setHabits(data.data || []);
+        const remoteHabits = data.data || [];
+
+        for (const habit of remoteHabits) {
+          try {
+            await DatabaseService.saveHabit({
+              id: habit.id.toString(),
+              name: habit.nombre,
+              description: habit.descripcion || '',
+              objetivo_diario: habit.objetivo_diario,
+              created_at: Date.now(),
+              updated_at: Date.now(),
+              sync_status: 'synced',
+            });
+          } catch (dbError) {
+            console.log('Error al guardar hábito local:', dbError);
+          }
+        }
+
+        setHabits(remoteHabits);
         setLastSync(new Date());
         setIsConnected(true);
-        
-        const pending = (data.data || []).filter(
+
+        const pending = remoteHabits.filter(
           (h: Habit) => h.sync_status === 'pending'
         ).length;
         setPendingCount(pending);
       } else {
         setError(data.message || 'Error al cargar hábitos');
-        setHabits([]);
+        await loadLocalHabits();
       }
     } catch (err) {
       console.error('❌ Error al cargar hábitos:', err);
       setError('No se pudieron cargar los hábitos');
-      setHabits([]);
+      await loadLocalHabits();
       setIsConnected(false);
     } finally {
       setLoading(false);
@@ -110,14 +181,62 @@ export default function DashboardScreen() {
   };
 
   // ==========================================
-  // 3. EFECTO INICIAL
+  // 5. EFECTO INICIAL (CON RESET DE ITEMS FALLIDOS)
   // ==========================================
   useEffect(() => {
-    fetchHabits();
+    const init = async () => {
+      console.log('🚀 Iniciando app...');
+
+      // Resetear items fallidos a pending
+      await DatabaseService.resetFailedItems();
+
+      // Luego cargar hábitos
+      fetchHabits();
+    };
+
+    init();
   }, []);
 
   // ==========================================
-  // 4. FUNCIONES DE INTERACCIÓN
+  // 6. LISTENER DE CAMBIO DE RED
+  // ==========================================
+  useEffect(() => {
+    const subscription = Network.addNetworkStateListener(async (state) => {
+      console.log('🌐 Estado de red:', {
+        isConnected: state.isConnected,
+        isInternetReachable: state.isInternetReachable,
+      });
+
+      if (state.isConnected === false) {
+        console.log('📴 Sin conexión de red');
+        setIsConnected(false);
+        setError('Sin conexión. Mostrando datos locales.');
+        await loadLocalHabits();
+      } else {
+        console.log('🔍 Verificando conexión con el backend...');
+        const backendReachable = await checkConnection();
+
+        if (backendReachable) {
+          console.log('🟢 Backend alcanzable');
+          setError(undefined);
+          setIsConnected(true);
+
+          await processQueue();
+          await fetchHabits();
+        } else {
+          console.log('⚠️ Backend no alcanzable');
+          setIsConnected(false);
+          setError('Sin conexión. Mostrando datos locales.');
+          await loadLocalHabits();
+        }
+      }
+    });
+
+    return () => subscription.remove();
+  }, []);
+
+  // ==========================================
+  // 7. FUNCIONES DE INTERACCIÓN
   // ==========================================
   const handleHabitPress = (habit: Habit) => {
     console.log('📱 Hábito presionado:', habit.nombre);
@@ -125,7 +244,7 @@ export default function DashboardScreen() {
 
   const handleToggleComplete = (habit: Habit) => {
     const updated = { ...habit, completado: !habit.completado };
-    setHabits(habits.map(h => (h.id === habit.id ? updated : h)));
+    setHabits(habits.map((h) => (h.id === habit.id ? updated : h)));
   };
 
   const handleRetry = () => {
@@ -137,7 +256,7 @@ export default function DashboardScreen() {
   };
 
   // ==========================================
-  // 5. UTILIDAD: TIEMPO DESDE ÚLTIMA SYNC
+  // 8. UTILIDAD: TIEMPO DESDE ÚLTIMA SYNC
   // ==========================================
   const getTimeSinceSync = (): string => {
     if (!lastSync) return 'Nunca sincronizado';
@@ -150,11 +269,10 @@ export default function DashboardScreen() {
   };
 
   // ==========================================
-  // 6. RENDER
+  // 9. RENDER
   // ==========================================
   return (
     <ScreenContainer scrollable={true}>
-      {/* Barra de estado de conexión */}
       <View
         style={[
           styles.statusBar,
@@ -172,41 +290,35 @@ export default function DashboardScreen() {
         >
           {isConnected ? '🟢 Conectado' : '🔴 Sin conexión'}
         </Text>
-        
+
         {!isConnected && lastSync && (
           <Text style={[styles.ageText, { color: '#C62828' }]}>
             📊 {getTimeSinceSync()}
           </Text>
         )}
-        
+
         {pendingCount > 0 && (
           <View style={styles.pendingBadge}>
-            <Text style={styles.pendingText}>⏳ {pendingCount} pendiente(s)</Text>
+            <Text style={styles.pendingText}>
+              ⏳ {pendingCount} pendiente(s)
+            </Text>
           </View>
         )}
       </View>
 
-      {/* Header */}
       <View style={styles.header}>
         <Text
-          style={[
-            styles.title,
-            { color: theme.colors.semantic.text.primary },
-          ]}
+          style={[styles.title, { color: theme.colors.semantic.text.primary }]}
         >
           🧘 MindfulTrack
         </Text>
         <Text
-          style={[
-            styles.subtitle,
-            { color: theme.colors.semantic.text.secondary },
-          ]}
+          style={[styles.subtitle, { color: theme.colors.semantic.text.secondary }]}
         >
           Tus hábitos diarios
         </Text>
       </View>
 
-      {/* Lista de hábitos */}
       <HabitList
         habits={habits}
         loading={loading}
@@ -216,7 +328,6 @@ export default function DashboardScreen() {
         onRetry={handleRetry}
       />
 
-      {/* Botón de nuevo hábito */}
       <Button variant="primary" fullWidth onPress={handleAddHabit}>
         + Nuevo Hábito
       </Button>
