@@ -1,23 +1,36 @@
 {
   "expo": {
-    "name": "mobile-frontend",
-    "slug": "mobile-frontend",
+    "name": "MindfulTrack",
+    "slug": "mindfultrack",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "mobilefrontend",
+    "scheme": "mindfultrack",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.macabro1.mindfultrack",
+      "infoPlist": {
+        "NSCameraUsageDescription": "MindfulTrack necesita acceso a tu cámara para que puedas tomar una foto y asociarla a tus hábitos.",
+        "NSPhotoLibraryUsageDescription": "MindfulTrack necesita acceso a tu galería para que puedas seleccionar una imagen y asociarla a tus hábitos.",
+        "NSUserNotificationsUsageDescription": "MindfulTrack necesita enviar notificaciones para recordarte completar tus hábitos diarios."
+      }
     },
     "android": {
+      "package": "com.macabro1.mindfultrack",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.SCHEDULE_EXACT_ALARM",
+        "android.permission.USE_EXACT_ALARM"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -35,7 +48,22 @@
         }
       ],
       "expo-secure-store",
-      "expo-sqlite"
+      "expo-sqlite",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "MindfulTrack necesita acceso a tu galería para que puedas seleccionar una imagen y asociarla a tus hábitos.",
+          "cameraPermission": "MindfulTrack necesita acceso a tu cámara para que puedas tomar una foto y asociarla a tus hábitos."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/icon.png",
+          "color": "#4CAF50",
+          "defaultChannel": "habits"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
