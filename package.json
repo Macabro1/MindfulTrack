@@ -1,0 +1,9 @@
+{
+  "name": "mindfultrack",
+  "version": "1.0.0",
+  "private": true,
+  "description": "MindfulTrack monorepo wrapper",
+  "scripts": {
+    "start": "cd backend && npm start"
+  }
+}
