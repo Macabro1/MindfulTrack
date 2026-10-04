@@ -8,6 +8,7 @@ import { Button } from '../../components/Button';
 import { useTheme } from '../../hooks/useTheme';
 import DatabaseService from '../../services/database';
 import SyncService from '../../services/syncService';
+import api from '../../services/api';
 
 // ============================================
 // CONFIGURACIÓN
@@ -40,22 +41,17 @@ export default function DashboardScreen() {
   const [pendingCount, setPendingCount] = useState(0);
 
   // ==========================================
-  // 1. VERIFICAR CONEXIÓN
+  // 1. VERIFICAR CONEXIÓN (usando cliente api)
   // ==========================================
   const checkConnection = async (): Promise<boolean> => {
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
-
-      const response = await fetch(`${API_URL}/api/health`, {
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeoutId);
-      const connected = response.ok;
+      // Usar el cliente api en lugar de fetch directo
+      const response = await api.get('/health', { timeout: 5000 });
+      const connected = response.status === 200;
       setIsConnected(connected);
       return connected;
-    } catch {
+    } catch (error: any) {
+      console.log('⚠️ Health check falló:', error.message);
       setIsConnected(false);
       return false;
     }
@@ -109,7 +105,7 @@ export default function DashboardScreen() {
   };
 
   // ==========================================
-  // 4. CARGAR HÁBITOS (remoto + local)
+  // 4. CARGAR HÁBITOS (usando el cliente api)
   // ==========================================
   const fetchHabits = async () => {
     setLoading(true);
@@ -129,15 +125,9 @@ export default function DashboardScreen() {
       // Procesar cola antes de cargar
       await processQueue();
 
-      const response = await fetch(`${API_URL}/api/habits`, {
-        headers: { 'Content-Type': 'application/json' },
-      });
-
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-
-      const data = await response.json();
+      // Usar cliente api (con interceptor de token)
+      const response = await api.get('/habits');
+      const data = response.data;
 
       if (data.success) {
         const remoteHabits = data.data || [];
@@ -170,10 +160,27 @@ export default function DashboardScreen() {
         setError(data.message || 'Error al cargar hábitos');
         await loadLocalHabits();
       }
-    } catch (err) {
+    } catch (err: any) {
+      // Si es forceLogout (usuario cerró sesión), NO mostrar error
+      if (err?.forceLogout) {
+        console.log('🔒 Sesión cerrada, limpiando estado...');
+        setError(undefined);
+        setHabits([]);
+        setPendingCount(0);
+        setIsConnected(false);
+        return;
+      }
+
       console.error('❌ Error al cargar hábitos:', err);
-      setError('No se pudieron cargar los hábitos');
-      await loadLocalHabits();
+
+      if (err.response?.status === 401) {
+        console.log('🔒 Token expirado, cargando locales...');
+        setError('Sesión expirada. Inicia sesión nuevamente.');
+        await loadLocalHabits();
+      } else {
+        setError('No se pudieron cargar los hábitos');
+        await loadLocalHabits();
+      }
       setIsConnected(false);
     } finally {
       setLoading(false);
@@ -181,19 +188,14 @@ export default function DashboardScreen() {
   };
 
   // ==========================================
-  // 5. EFECTO INICIAL (CON RESET DE ITEMS FALLIDOS)
+  // 5. EFECTO INICIAL
   // ==========================================
   useEffect(() => {
     const init = async () => {
       console.log('🚀 Iniciando app...');
-
-      // Resetear items fallidos a pending
       await DatabaseService.resetFailedItems();
-
-      // Luego cargar hábitos
       fetchHabits();
     };
-
     init();
   }, []);
 
@@ -220,7 +222,6 @@ export default function DashboardScreen() {
           console.log('🟢 Backend alcanzable');
           setError(undefined);
           setIsConnected(true);
-
           await processQueue();
           await fetchHabits();
         } else {

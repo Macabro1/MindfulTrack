@@ -60,8 +60,15 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const logout = async () => {
-    await AuthService.logout();
+    // ============================================
+    // CORRECCIÓN: Limpiar el estado del usuario PRIMERO
+    // Esto dispara la redirección al login en _layout.tsx
+    // ANTES de que las peticiones en curso fallen con 401
+    // ============================================
     setUser(null);
+
+    // Luego limpiar tokens y datos locales
+    await AuthService.logout();
   };
 
   return (

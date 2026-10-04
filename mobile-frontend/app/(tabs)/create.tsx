@@ -14,8 +14,7 @@ import { useTheme } from '../../hooks/useTheme';
 import ImageService from '../../services/imageService';
 import NotificationService from '../../services/notificationService';
 import DatabaseService from '../../services/database';
-
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
+import api from '../../services/api';
 
 export default function CreateHabitScreen() {
   const router = useRouter();
@@ -84,48 +83,48 @@ export default function CreateHabitScreen() {
       console.log('✅ Hábito agregado a la cola');
 
       // ============================================
-      // 3. INTENTAR ENVIAR AL BACKEND
+      // 3. INTENTAR ENVIAR AL BACKEND (con api)
       // ============================================
       let backendSuccess = false;
 
       try {
-        const response = await fetch(`${API_URL}/api/habits`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            nombre: nombre.trim(),
-            descripcion: descripcion.trim(),
-            objetivo_diario: Number(objetivoDiario),
-          }),
+        const response = await api.post('/habits', {
+          nombre: nombre.trim(),
+          descripcion: descripcion.trim(),
+          objetivo_diario: Number(objetivoDiario),
         });
 
-        if (response.ok) {
-          const data = await response.json();
-          if (data.data?.id) {
-            await DatabaseService.saveHabit({
-              ...localHabit,
-              id: data.data.id.toString(),
-              sync_status: 'synced',
-            });
+        const data = response.data;
 
-            if (recordatorioActivo) {
-              try {
-                await NotificationService.scheduleHabitReminder(
-                  data.data.id,
-                  nombre.trim(),
-                  9,
-                  0
-                );
-              } catch (notifError) {
-                console.log('No se pudo programar notificación:', notifError);
-              }
+        if (data.success && data.data?.id) {
+          // Actualizar con el ID del servidor
+          await DatabaseService.saveHabit({
+            ...localHabit,
+            id: data.data.id.toString(),
+            sync_status: 'synced',
+          });
+
+          // Programar notificación si está activo
+          if (recordatorioActivo) {
+            try {
+              await NotificationService.scheduleHabitReminder(
+                data.data.id,
+                nombre.trim(),
+                9,
+                0
+              );
+              console.log('✅ Recordatorio programado');
+            } catch (notifError) {
+              console.log('No se pudo programar notificación:', notifError);
             }
-
-            backendSuccess = true;
           }
+
+          backendSuccess = true;
+          console.log('✅ Hábito sincronizado con el backend');
         }
-      } catch (backendError) {
-        console.log('📴 Sin conexión, se sincronizará después');
+      } catch (backendError: any) {
+        // Si el backend falla (sin conexión, 401, etc.), queda en la cola
+        console.log('📴 Sin conexión o error, se sincronizará después:', backendError.message);
       }
 
       // ============================================
